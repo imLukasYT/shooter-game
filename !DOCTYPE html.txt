@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Shooter mit Map + Kills + Punkte</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #222;
+      color: white;
+      margin: 0;
+      overflow: hidden;
+    }
+    #game {
+      background: #2e2e2e;
+      display: block;
+      margin: 20px auto;
+      border: 2px solid #555;
+    }
+    #hud {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 200px;
+      background: #111a;
+      padding: 10px;
+      border-radius: 6px;
+    }
+    #hud div {
+      margin-bottom: 8px;
+    }
+    #shop {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 220px;
+      background: #111a;
+      padding: 10px;
+      border-radius: 6px;
+    }
+    button {
+      width: 100%;
+      margin-top: 5px;
+      padding: 8px;
+      background: #3366ff;
+      border: none;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    button:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+    #gameOver {
+      position: fixed;
+      top: 40%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #000e;
+      padding: 30px 50px;
+      border-radius: 10px;
+      font-size: 24px;
+      display: none;
+      text-align: center;
+      color: #f44;
+      font-weight: bold;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="game" width="1000" height="700"></canvas>
+
+<div id="hud">
+  <div id="health">Leben: 100</div>
+  <div id="score">Punkte: 0</div>
+  <div id="timer">Zeit: 10:00</div>
+  <div id="highscore">Highscore: 0</div>
+</div>
+
+<div id="shop">
+  <div><b>Shop</b></div>
+  <button id="buyDamage">+ Mehr Schaden (5 Punkte)</button>
+  <button id="buyInvisibility">Unsichtbarkeit (10 Punkte)</button>
+  <div>Schaden-Level: <span id="damageLevel">1</span></div>
+  <div>Unsichtbar: <span id="invisibleStatus">Nein</span></div>
+</div>
+
+<div id="gameOver">Spiel vorbei!<br>Drücke F5 zum Neustart</div>
+
+<audio id="shoot-sound" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_5b932a6b8d.mp3?filename=gunshot-81891.mp3"></audio>
+<audio id="step-sound" src="https://cdn.pixabay.com/download/audio/2023/03/29/audio_3e2cde48b1.mp3?filename=footsteps-on-gravel-14599.mp3"></audio>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+let player = {
+  x: 500,
+  y: 350,
+  size: 20,
+  speed: 3,
+  health: 100,
+  damageLevel: 1,
+  invisible: false
+};
+
+let keys = {};
+let walls = [
+  { x: 150, y: 100, w: 700, h: 10 },
+  { x: 150, y: 590, w: 700, h: 10 },
+  { x: 150, y: 100, w: 10, h: 500 },
+  { x: 840, y: 100, w: 10, h: 500 }
+];
+
+let enemies = [];
+const enemyCount = 8;
+
+for (let i = 0; i < enemyCount; i++) {
+  enemies.push({
+    x: Math.random() * 680 + 160,
+    y: Math.random() * 480 + 120,
+    size: 20,
+    speed: 1.2,
+    health: 20
+  });
+}
+
+const shootSound = document.getElementById('shoot-sound');
+const stepSound = document.getElementById('step-sound');
+let stepCooldown = 0;
+
+let score = 0;
+let highscore = parseFloat(localStorage.getItem('shooter_highscore')) || 0;
+let gameTime = 600; // 10 Minuten in Sekunden
+let gameEnded = false;
+
+const healthElem = document.getElementById('health');
+const scoreElem = document.getElementById('score');
+const timerElem = document.getElementById('timer');
+const highscoreElem = document.getElementById('highscore');
+const gameOverElem = document.getElementById('gameOver');
+
+const buyDamageBtn = document.getElementById('buyDamage');
+const buyInvisibilityBtn = document.getElementById('buyInvisibility');
+const damageLevelElem = document.getElementById('damageLevel');
+const invisibleStatusElem = document.getElementById('invisibleStatus');
+
+document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+document.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+canvas.addEventListener('click', () => {
+  if (gameEnded) return;
+  shootSound.currentTime = 0;
+  shootSound.play();
+
+  // Schuss in Blickrichtung: Gegner in Fadenkreuzmitte (Mitte Canvas)
+  const crossX = canvas.width / 2;
+  const crossY = canvas.height / 2;
+
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    const dist = Math.hypot(e.x - crossX, e.y - crossY);
+    if (dist < e.size + 5) {
+      // Schaden
+      e.health -= player.damageLevel * 10;
+      if (e.health <= 0) {
+        enemies.splice(i, 1);
+        score += 2.5;
+        scoreElem.textContent = "Punkte: " + score.toFixed(1);
+        localStorage.setItem('shooter_score', score.toFixed(1));
+      }
+      break;
+    }
+  }
+});
+
+function movePlayer() {
+  let moved = false;
+  let dx = 0, dy = 0;
+
+  if (keys['w']) { dy -= player.speed; moved = true; }
+  if (keys['s']) { dy += player.speed; moved = true; }
+  if (keys['a']) { dx -= player.speed; moved = true; }
+  if (keys['d']) { dx += player.speed; moved = true; }
+
+  let newX = player.x + dx;
+  let newY = player.y + dy;
+
+  let collide = false;
+  for(let w of walls) {
+    if(newX < w.x + w.w && newX + player.size > w.x &&
+       newY < w.y + w.h && newY + player.size > w.y) {
+      collide = true;
+      break;
+    }
+  }
+
+  if (!collide) {
+    player.x = newX;
+    player.y = newY;
+
+    if (moved && stepCooldown <= 0) {
+      stepSound.currentTime = 0;
+      stepSound.play();
+      stepCooldown = 20;
+    }
+  }
+}
+
+function moveEnemies() {
+  for (let e of enemies) {
+    let dx = player.x - e.x;
+    let dy = player.y - e.y;
+    let dist = Math.hypot(dx, dy);
+
+    if (dist > e.size + player.size) {
+      e.x += (dx / dist) * e.speed;
+      e.y += (dy / dist) * e.speed;
+    } else {
+      // Spieler Schaden
+      player.health -= 0.3;
+      if (player.health < 0) player.health = 0;
+    }
+  }
+}
+
+buyDamageBtn.onclick = () => {
+  if(score >= 5) {
+    score -= 5;
+    player.damageLevel++;
+    damageLevelElem.textContent = player.damageLevel;
+    scoreElem.textContent = "Punkte: " + score.toFixed(1);
+    localStorage.setItem('shooter_score', score.toFixed(1));
+  }
+};
+
+buyInvisibilityBtn.onclick = () => {
+  if(score >= 10) {
+    score -= 10;
+    player.invisible = !player.invisible;
+    invisibleStatusElem.textContent = player.invisible ? "Ja" : "Nein";
+    scoreElem.textContent = "Punkte: " + score.toFixed(1);
+    localStorage.setItem('shooter_score', score.toFixed(1));
+  }
+};
+
+function drawPerson(x, y, size, color, invisible = false) {
+  ctx.font = `${size * 2}px Arial`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = invisible ? "rgba(255,255,255,0.3)" : color;
+  ctx.fillText("🧍", x, y);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Map (Wände)
+  ctx.fillStyle = "#444";
+  for(let w of walls) {
+    ctx.fillRect(w.x, w.y, w.w, w.h);
+  }
+
+  // Spieler
+  drawPerson(player.x, player.y, player.size, "cyan", player.invisible);
+
+  // Gegner
+  for(let e of enemies) {
+    drawPerson(e.x, e.y, e.size, "red");
+  }
+}
+
+function updateHUD() {
+  healthElem.textContent = "Leben: " +
+
